@@ -1,11 +1,11 @@
 #! /bin/bash
+# vim: ts=4:noet
+
+TARGET_DIR="/opt/fcc_lenovo"
+SYSTEMD_DIR="/etc/systemd/system"
 
 echo "Copying files and libraries..."
-
-if [ ! -d "/opt/fcc_lenovo" ]
-then
-        sudo mkdir /opt/fcc_lenovo
-fi
+sudo mkdir -p "$TARGET_DIR"
 
 ### Identify current OS
 OS_UBUNTU="Ubuntu"
@@ -14,60 +14,74 @@ OS_FEDORA="Fedora"
 source /etc/os-release
 echo $NAME
 
-if [[ "$NAME" == *"$OS_UBUNTU"* ]]
-then
-	### Copy fcc unlock script for MM
-	sudo tar -zxf fcc-unlock.d.tar.gz -C /usr/lib/x86_64-linux-gnu/ModemManager/
-	sudo chmod ugo+x /usr/lib/x86_64-linux-gnu/ModemManager/fcc-unlock.d/*
+CP_OPTS="-rvf"
 
-	### Copy SAR config files
-	sudo tar -zxf sar_config_files.tar.gz -C /opt/fcc_lenovo/
+LIB_FILES=("libconfigserviceR+.so" "libconfigservice350.so" "libmbimtools.so")
+LIB64_FILES=("libmodemauth.so")
+BIN_FILES=("DPR_Fcc_unlock_service" "configservice_lenovo")
 
-	### Copy libraries
-	sudo cp -rvf libmodemauth.so /usr/lib/
-	sudo cp -rvf libconfigserviceR+.so /usr/lib/
-	sudo cp -rvf libconfigservice350.so /usr/lib/
-	sudo cp -rvf libmbimtools.so /usr/lib/
+case $NAME in
+	*"$OS_UBUNTU"*)
+		LIB_PATH="/usr/lib"
+		LIB64_PATH="/usr/lib"
+		LIB_MM_PATH="/usr/lib/x86_64-linux-gnu/ModemManager"
+		;;
+	*"$OS_FEDORA"*)
+		LIB_PATH="/usr/lib"
+		LIB64_PATH="/usr/lib64"
+		LIB_MM_PATH="/usr/lib64/ModemManager"
+		CIL_FILES=("mm_FccUnlock.cil" "mm_dmidecode.cil" "mm_sh.cil")
 
-elif [[ "$NAME" == *"$OS_FEDORA"* ]]
-then
-	### Copy fcc unlock script for MM
-	sudo tar -zxf fcc-unlock.d.tar.gz -C /usr/lib64/ModemManager/
-	sudo chmod ugo+x /usr/lib64/ModemManager/fcc-unlock.d/*
+		ln -s /usr/sbin/lspci /usr/bin/lspci
+		;;
+	*)
+		echo "No need to copy files"
+		exit 0
+		;;
+esac
 
-	### Copy SAR config files
-	sudo tar -zxf sar_config_files.tar.gz -C /opt/fcc_lenovo/
+### Copy fcc unlock script for MM
+sudo tar -zxf fcc-unlock.d.tar.gz -C "$LIB_MM_PATH"
+sudo chmod ugo+x "$LIB_MM_PATH/fcc-unlock.d/*"
 
-	ln -s /usr/sbin/lspci /usr/bin/lspci
+### Copy SAR config files
+sudo tar -zxf sar_config_files.tar.gz -C "$TARGET_DIR"
 
-	### Copy libraries
-	sudo cp -rvf libmodemauth.so /usr/lib64/
-	sudo cp -rvf libconfigserviceR+.so /usr/lib/
-	sudo cp -rvf libconfigservice350.so /usr/lib/
-	sudo cp -rvf libmbimtools.so /usr/lib/
+### Copy libraries
+for file in "${LIB_FILES[@]}"
+do
+	sudo cp $CP_OPTS "$file" "$LIB_PATH"
+done
 
-	### Copy files for selinux for fedora
-	sudo cp -rvf mm_FccUnlock.cil /opt/fcc_lenovo
-	sudo cp -rvf mm_dmidecode.cil /opt/fcc_lenovo
-	sudo cp -rvf mm_sh.cil /opt/fcc_lenovo
-	sudo semodule -i /opt/fcc_lenovo/*.cil
-
-else
-    echo "No need to copy files"
-    exit 0
-fi
+for file in "${LIB64_FILES[@]}"
+do
+	sudo cp $CP_OPTS "$file" "$LIB64_PATH"
+done
 
 ### Copy binary
-sudo cp -rvf DPR_Fcc_unlock_service /opt/fcc_lenovo/
-sudo cp -rvf configservice_lenovo /opt/fcc_lenovo/
+for file in "${BIN_FILES[@]}"
+do
+	sudo cp $CP_OPTS "$file" "$TARGET_DIR"
+done
 
-## copy and enable service
-sudo cp -rvf lenovo-cfgservice.service /etc/systemd/system/.
+### Copy files for selinux
+# shellcheck disable=SC2128
+if [ -n "$CIL_FILES" ]
+then
+	for file in "${CIL_FILES[@]}"
+	do
+		sudo cp $CP_OPTS "$file" "$TARGET_DIR"
+	done
+	sudo semodule -i "$TARGET_DIR/*.cil"
+fi
+
+### Copy and enable service
+sudo cp $CP_OPTS lenovo-cfgservice.service "$SYSTEMD_DIR"
 sudo systemctl daemon-reload
 systemctl enable lenovo-cfgservice
 
 ### Grant permissions to all binaries and script
-sudo chmod ugo+x /opt/fcc_lenovo/*
+sudo chmod ugo+x "$TARGET_DIR/*"
 
 ## Please reboot machine (this will be needed only one for time)##
 
